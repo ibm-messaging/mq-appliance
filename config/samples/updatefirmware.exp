@@ -1,0 +1,150 @@
+#!/usr/bin/expect
+# *****************************************************************************
+# Copyright (c) 2016 IBM Corporation and other Contributors.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+#
+# ***************************************************************************** 
+########################################################################
+##      updatefirmware.exp                                            ##
+##                                                                    ##
+## A script to upgrade the firmware of an MQ Appliance to the         ##
+## required level. You must supply a fully qualified location         ##
+## for your *.scrypt3 firmware file in a form supported by 'copy'     ##
+##                                                                    ##
+########################################################################
+
+########################################################################
+##                                                                    ##
+##              THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT       ## 
+##                         YOUR APPLIANCE!                            ##
+##                                                                    ##
+########################################################################
+
+#Change this to your appliance IP
+set applianceIP "127.0.0.1"
+#Change this to your appliance login
+set applianceLogin "username"
+#Change this to the scp location of the firmware
+set firmwareSourceLocation "scp://user@127.0.0.1//firmware.scrypt3"
+
+########################################################################
+##                                                                    ##
+##                   END OF USER DEFINED VARIABLES                    ## 
+##                                                                    ##
+########################################################################
+
+# If it doesn't see the expected line, timeout after 10 minutes.
+set timeout 600
+#parse arguments
+set argsLength [llength $argv]
+
+#initialize argument variables
+set helpmessage             "usage: expect backup.exp "
+append helpmessage          "\n         \[-appliance_password sets the password for the appliance\] "
+
+#Variables can be specified as parameters and validated like this...
+set appliancePassword ""
+
+#Parameter setting
+for {set i 0} {$i < $argsLength} {incr i 1} {
+    set cur [lindex $argv $i]
+    if { $cur == "-h" } {
+        send $helpmessage
+        exit
+    } elseif { $cur == "-appliance_password" } {
+            set appliancePassword [lindex $argv $i+1]
+    }
+}
+
+#Parameter validation
+if { $appliancePassword == "" } {
+        send "Error: No password for MQ appliance found. Please use -appliance_password <password>. Use -h option to display help.\n"
+        exit
+}
+
+#...Or alternatively set by prompting interactively as we do here for the 'source' password
+# grab the password from the user (who can just hit enter if insecure server)
+stty -echo
+send_user -- "Password for $firmwareSourceLocation (blank for none):\n"
+expect_user -re "(.*)\n"
+send_user "\n"
+stty echo
+set scpPassword $expect_out(1,string)
+
+# Start the SSH session
+# May find it useful to add in -o StrictHostKeyChecking=no
+# to automatically answer yfirmwareSourceLocationwhether the host should be added 
+# to the list of known hosts.
+spawn ssh $applianceIP
+
+#send login information
+expect "login:"
+send "$applianceLogin\n"
+expect "Password:"
+send "$appliancePassword\n"
+#wait for the prompt before continuing
+expect "#"
+
+#Config mode
+send "config\n"
+expect "#"
+
+#send the copy command
+send "copy $firmwareSourceLocation image://\n"
+
+#Expected values
+expect {
+        #If we see password, this a remote location e.g scp so a password is required
+        "Password: " {
+                #Ensure a password is provided or else exit out
+                if { $scpPassword == "" } {
+                        puts "Error: No password for scp uri provided. Please enter it at the prompt\n"
+                        send "\n"
+                        expect "#"
+                        send "exit\n"
+                        expect "#"
+                        send "exit\n"
+                        expect eof
+                        exit
+                } else {
+                        send "$scpPassword\n"
+                }
+        
+        }
+}
+
+expect {
+        "File copy success" {
+                expect "#"
+                send "flash\n"
+                expect "#"
+                set filePath [file split $firmwareSourceLocation]
+                set file [lindex $filePath end]
+                puts "Sending: boot image accept-license $file\n"
+                send "boot image accept-license $file\n"
+                expect "Firmware upgrade successful"
+                expect eof
+                exit
+        }
+        #If we see a percentage sign this entails error
+        "%" {
+                send "exit\n"
+                expect "#"
+                send "exit\n"
+                expect eof
+                stty -echo
+                send_user -- "Error: File copy failed..\nEnsure source URI, destination URI and URI password are correct and try again\n"
+                stty echo
+        }
+        "Copy: overwrite" {
+                stty -echo
+                send_user -- "Existing file with provided name found on appliance. Overwrite? Yes/No [y/n]: \n"
+                expect_user -re "(.*)\n"
+                send_user "\n"
+                stty echo
+        }
+}

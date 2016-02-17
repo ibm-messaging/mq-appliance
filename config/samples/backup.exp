@@ -1,0 +1,338 @@
+#!/usr/bin/expect
+# *****************************************************************************
+# Copyright (c) 2016 IBM Corporation and other Contributors.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+#
+# *****************************************************************************
+########################################################################
+##      backup.exp                                                    ##
+##                                                                    ##
+## An example script to backup configuration data from MQ appliance.  ##
+## The files will be downloaded to the machine where script is        ##
+## executed into a new folder in current working directory named:     ##
+##      'applianceBackup<timestamp>'                                  ##
+##                                                                    ##
+## List of files backed up:                                           ##
+##   -> System config: autoconfig.cfg                                 ##
+##   -> Users: user_backup                                            ##
+##   -> Per QM Backups:                                               ##
+##      - QM INI file: <QM_NAME>.ini                                  ##
+##      - QM Config file: <QM_NAME>.cfg                               ##
+##      - QM Key Repos and Password: <QM_NAME>_keyrepos.tar.gz        ##
+##                                 & <QM_NAME>keybackup_password.txt  ##
+##                                                                    ##
+########################################################################
+
+########################################################################
+##                                                                    ##
+##              THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT       ## 
+##                         YOUR APPLIANCE!                            ##
+##                                                                    ##
+########################################################################
+
+#Change this to your appliance IP
+set applianceIP "127.0.0.1"
+#Change this to your appliance login
+set applianceLogin "admin"
+
+########################################################################
+##                                                                    ##
+##                   END OF USER DEFINED VARIABLES                    ## 
+##                                                                    ##
+########################################################################
+
+# If it doesn't see the expected line, timeout after 10 minutes.
+set timeout 600
+
+#parse arguments
+set argsLength [llength $argv]
+
+#initialize argument variables
+set helpmessage             "usage: expect backup.exp "
+append helpmessage          "\n         \[-appliance_password sets the password for the appliance\] "
+
+#Passwords are specified as parameters and validated to avoid hard coding
+set appliancePassword ""
+
+#Parameter setting
+for {set i 0} {$i < $argsLength} {incr i 1} {
+    set cur [lindex $argv $i]
+    if { $cur == "-h" } {
+            send $helpmessage
+        exit
+    } elseif { $cur == "-appliance_password" } {
+            set appliancePassword [lindex $argv $i+1]
+    }
+}
+
+#Parameter validation
+if { $appliancePassword == "" } {
+        send "Error: No password for MQ appliance found. Please use -appliance_password <password>. Use -h option to display help.\n"
+        exit
+}
+
+#Set up the SCP location for the appliance to write backup files to.
+#Get current working directory
+set curDir [exec pwd]
+#Get hostname of machine
+set hostname $::env(HOSTNAME)
+#Get the current user
+set user [exec whoami]
+
+#Create a folder to back up to
+set clockFormat [clock format [clock seconds] -format %Y%m%d%H%M%S]
+set backupFolder "applianceBackup$clockFormat"
+exec mkdir $backupFolder
+
+#Set the backup location
+set backupLocation "scp://$user@$hostname/$curDir/applianceBackup$clockFormat"
+
+# grab the password
+stty -echo
+send_user -- "Password for $user@$hostname: "
+expect_user -re "(.*)\n"
+send_user "\n"
+stty echo
+set backupLocationPassword $expect_out(1,string)
+
+# Start the SSH session
+# May find it useful to add in -o StrictHostKeyChecking=no
+# to automatically answer yes to whether the host should be added 
+# to the list of known hosts.
+spawn ssh $applianceIP
+
+#send login information
+expect "login:"
+send "$applianceLogin\n"
+expect "Password:"
+send "$appliancePassword\n"
+#wait for the prompt before continuing
+expect "#"
+
+#Config mode
+send "config\n"
+expect "#"
+
+#Back up appliance configuration.
+send "write memory\n"
+expect "Overwrite"
+send "y\n"
+expect "#"
+
+#copy appliance configuration to backup location
+send "copy config:///autoconfig.cfg $backupLocation\n"
+
+expect {
+        "Password" {
+                send "$backupLocationPassword\n"
+        }
+        #If we see a percentage sign this entails error
+        "%" {
+                send "exit\n"
+                expect "#"
+                send "exit\n"
+                expect eof
+                exit
+        }
+}
+
+
+expect {
+        "File copy success" {
+                expect "#"
+        }
+        #If we see a percentage sign this entails error
+        "%" {
+                send "exit\n"
+                expect "#"
+                send "exit\n"
+                expect eof
+                exit
+        }
+}
+
+send "exit\n"
+expect "#"
+send "mqcli\n"
+expect "#"
+
+#Back up messaging users
+send "userbackup -f user_backup\n"
+expect "#"
+
+send "exit\n"
+expect "#"
+send "config\n"
+expect "#"
+
+#copy appliance users to backup location
+send "copy mqbackup:///user_backup $backupLocation\n"
+expect "Password"
+send "$backupLocationPassword\n"
+
+expect {
+        "File copy success" {
+                expect "#"
+        }
+        #If we see a percentage sign this entails error
+        "%" {
+                send "exit\n"
+                expect "#"
+                send "exit\n"
+                expect eof
+                exit
+        }
+}
+
+send "exit\n"
+expect "#"
+send "mqcli\n"
+expect "#"
+
+#Get list of Queue Managers
+send "dspmq\n"
+expect "#"
+
+set myVar $expect_out(buffer)
+
+set records [split $myVar "\n"]
+
+set qmNames [list]
+
+## Iterate over the records
+foreach rec $records {
+        set matched ""
+        set expressionMatch [regexp {QMNAME\((.+?)\)} $rec matched sub1 sub2]
+        if { $expressionMatch == 1} {
+                lappend qmNames $sub1
+        }
+}
+
+foreach qm $qmNames {
+        puts "QM found: $qm"
+}
+
+#Back up key repository (PER QM)
+foreach qm $qmNames {
+        #Send key back up command per QM
+        send "keybackup -m $qm\n"
+        expect "Do you wish to continue?"
+        send "Y\n"
+        
+        #These two expect statements will store the password of the key back up in the expect buffer, so we can extract the password.
+        expect "'."
+        expect "#"
+        
+        #Find the actual password from the expect buffer using a reg exp.
+        set myVar "$expect_out(buffer)\n"
+        puts "MYVAR: $myVar"
+        
+        set expressionMatch [regexp {Password for key repository is:\s*(\S+)} $myVar matched sub1]
+        
+        #If a match has been found to the reg exp store the password in a file named after the QM.
+        if { $expressionMatch == 1 } {
+                set filename "$qm\keybackup_password.txt"
+                # open the filename for writing
+                set fileId [open $filename "w"]
+                #Add the password to the file with name $filename
+                puts $fileId $sub1
+                # close the file, ensuring the data is written out before you continue
+                #  with processing.
+                close $fileId
+                #Move it to back up folder!!
+                exec mv $filename $backupFolder 
+        }
+        
+        
+
+        #Back up QM.INI
+        send "dspmqini -m $qm\n"
+        expect "#"
+        
+        set filename "$qm.ini"
+        # open the filename for writing
+        set fileId [open $filename "w"]
+        #Add the password to the file with name $filename
+        puts $fileId $expect_out(buffer)
+        # close the file, ensuring the data is written out before you continue
+        #  with processing.
+        close $fileId
+        #Move it to back up folder!!
+        exec mv $filename $backupFolder 
+        
+        #Back up QMs (PER QM)
+        send "strmqm $qm\n"
+        expect "#"
+        
+        #Back up QMs (PER QM)
+        send "dmpmqcfg -m $qm -a\n"
+        expect {
+                "#" {
+                        
+                }
+                "AMQ8146" {
+                        send "exit\n"
+                        expect "#"
+                        send "exit\n"
+                        expect eof
+                        exit
+                }
+        }
+        
+        send "exit\n"
+        expect "#"
+        send "config\n"
+        expect "#"
+        
+        #copy qm cfg back up to backup location
+        send "copy mqbackup:///$qm.cfg $backupLocation\n"
+        expect "Password"
+        send "$backupLocationPassword\n"
+        
+        expect {
+                "File copy success" {
+                        expect "#"
+                }
+                #If we see a percentage sign this entails error
+                "%" {
+                        send "exit\n"
+                        expect "#"
+                        send "exit\n"
+                        expect eof
+                }
+        }
+        
+        #copy qm key repos back up to backup location
+        send "copy mqbackup:///$qm\_keyrepos.tar.gz $backupLocation\n"
+        expect "Password"
+        send "$backupLocationPassword\n"
+        
+        expect {
+                "File copy success" {
+                        expect "#"
+                }
+                #If we see a percentage sign this entails error
+                "%" {
+                        send "exit\n"
+                        expect "#"
+                        send "exit\n"
+                        expect eof
+                }
+        }
+        
+        send "exit\n"
+        expect "#"
+        send "mqcli\n"
+        expect "#"
+}
+
+send "exit\n"
+expect "#"
+send "exit\n"
+
+puts "BACK UP TO LOCATION: $backupFolder COMPLETED."
+expect eof

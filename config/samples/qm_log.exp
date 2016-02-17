@@ -1,0 +1,117 @@
+#!/usr/bin/expect
+
+# *****************************************************************************
+# Copyright (c) 2016 IBM Corporation and other Contributors.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+#
+# *****************************************************************************
+
+########################################################################
+##      QM_LOG.EXP                                                    ##
+##                                                                    ##
+## A script to download a specific queue manager error log file from  ##
+## an MQ appliance to the local machine.                              ##
+##                                                                    ##
+## To view the QM error logs available interactively, log in to the   ##
+## appliance and type:                                                ##
+##                                                                    ##
+## # config                                                           ##
+## # dir mqerr:/qmgrs/<QMGR NAME>                                     ##
+##                                                                    ##
+########################################################################
+
+########################################################################
+##                                                                    ##
+##              THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT       ## 
+##                         YOUR APPLIANCE!                            ##
+##                                                                    ##
+########################################################################
+
+#Change this to your appliance IP
+set applianceIP "12.34.56.789"
+#Change this to your appliance login
+set applianceLogin "admin"
+#Change this to the QM name for the logs
+set qmName "QM_01"
+#Change this to the QM log file name
+set qmLogFileName "AMQERR01.LOG"
+
+########################################################################
+##                                                                    ##
+##                   END OF USER DEFINED VARIABLES                    ## 
+##                                                                    ##
+########################################################################
+
+# If it doesn't see the expected line, timeout after 10 minutes.
+set timeout 600
+
+#parse arguments
+set argsLength [llength $argv]
+
+#initialize argument variables
+set helpmessage             "usage: expect backup.exp "
+append helpmessage          "\n         \[-appliance_password sets the password for the appliance\] "
+
+#Passwords can be specified as parameters and validation to keep them out of hard code such as in the appliance password
+set appliancePassword ""
+
+#Parameter setting
+for {set i 0} {$i < $argsLength} {incr i 1} {
+    set cur [lindex $argv $i]
+    if { $cur == "-h" } {
+            send $helpmessage
+        exit
+    } elseif { $cur == "-appliance_password" } {
+            set appliancePassword [lindex $argv $i+1]
+    }
+}
+
+#Parameter validation
+if { $appliancePassword == "" } {
+        send "Error: No password for MQ appliance found. Please use -appliance_password <password>. Use -h option to display help.\n"
+        exit
+}
+
+#Set up the SCP location for the appliance to write backup files to.
+#Get current working directory
+set curDir [exec pwd]
+#Get hostname of machine
+set hostname $::env(HOSTNAME)
+#Get the current user
+set user [exec whoami]
+
+#Set the backup location
+set backupLocation "scp://$user@$hostname/$curDir"
+
+# grab the scp password from the user.
+stty -echo
+send_user -- "Password for $user@$hostname: "
+expect_user -re "(.*)\n"
+send_user "\n"
+stty echo
+set backupLocationPassword $expect_out(1,string)
+
+#SSH and log in to the appliance
+set send_slow {10 .001}
+spawn ssh -o StrictHostKeyChecking=no $applianceIP
+
+expect "login:"
+send "$applianceLogin\n"
+expect "Password:"
+send "$appliancePassword\n"
+expect "#"
+#Enter config mode and copy the file to the backup location
+send "config\n"
+expect "(config)#"
+send "copy mqerr:/qmgrs/$qmName/$qmLogFileName $backupLocation\n"
+expect "Password: "
+send "$backupLocationPassword\n"
+expect "#"
+send "exit\n"
+expect "#"
+send "exit\n"
+expect eof
