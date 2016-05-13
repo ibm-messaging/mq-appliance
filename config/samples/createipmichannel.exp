@@ -19,26 +19,6 @@
 ##                                                                    ##
 ########################################################################
 
-########################################################################
-##								                                      ##
-##		THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT	YOUR          ## 
-##                         APPLIANCE!                                 ##								    
-##                                                                    ##
-########################################################################
-
-#Change this to your appliance IP
-set applianceIP "12.34.56.789"
-#Change this to your appliance login
-set applianceLogin "admin"
-#Change this to your appliance password
-set appliancePassword "password"
-
-########################################################################
-##                                                                    ##
-##		     END OF USER DEFINED VARIABLES                            ## 
-##                                                                    ##
-########################################################################
-
 #parse arguments
 set argsLength [llength $argv]
 
@@ -50,7 +30,7 @@ append helpmessage	    "\n		\[-ipmi_user sets the ipmi username for the channel 
 append helpmessage	    "\n		\[-ipmi_ip sets the ip address for the ipmi channel  \] "
 append helpmessage	    "\n		\[-ipmi_default_gateway sets default gateway for the ipmi channel  \] "
 
-#Variables are set using command line arguments, except the passwords that aree prompted for.
+#Variables are set using command line arguments, except the passwords that are prompted for.
 set applianceIP ""
 set applianceLogin ""
 set ipmiUser ""
@@ -97,14 +77,14 @@ if { $applianceIP == "" } {
 # If it doesn't see the expected line, timeout after 10 minutes.
 set timeout 600
 
-#grab the ipmi-user
+#Prompt for passwords, appliance PW first.
 stty -echo
 send_user -- "appliance password:\n"
 expect_user -re "(.*)\n"
 send_user "\n"
 set appliancePassword $expect_out(1,string)
 
-#grab ipmi password
+#Now the ipmi users password.
 send_user -- "ipmi password:\n"
 expect_user -re "(.*)\n"
 send_user "\n"
