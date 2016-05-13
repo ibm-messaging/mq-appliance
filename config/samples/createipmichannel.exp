@@ -1,0 +1,169 @@
+#!/usr/bin/expect
+
+# *****************************************************************************
+# Copyright (c) 2016 IBM Corporation and other Contributors.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+#
+# *****************************************************************************
+
+########################################################################
+## 	CREATE_IPMI_CHANNEL.EXP                                           ##
+##                                                                    ##
+## A script that creates an ipmi lan channel and user                 ##
+## on your appliance. You must have an available                      ##
+## IP address to use for IPMI on the appliance                        ##
+##                                                                    ##
+########################################################################
+
+########################################################################
+##								                                      ##
+##		THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT	YOUR          ## 
+##                         APPLIANCE!                                 ##								    
+##                                                                    ##
+########################################################################
+
+#Change this to your appliance IP
+set applianceIP "12.34.56.789"
+#Change this to your appliance login
+set applianceLogin "admin"
+#Change this to your appliance password
+set appliancePassword "password"
+
+########################################################################
+##                                                                    ##
+##		     END OF USER DEFINED VARIABLES                            ## 
+##                                                                    ##
+########################################################################
+
+#parse arguments
+set argsLength [llength $argv]
+
+#initialize argument variables
+set helpmessage 	    "usage: expect backup.exp "
+append helpmessage	    "\n		\[-appliance_ip sets the ip address for the appliance\] "
+append helpmessage	    "\n		\[-appliance_user sets the username for the appliance\] "
+append helpmessage	    "\n		\[-ipmi_user sets the ipmi username for the channel  \] "
+append helpmessage	    "\n		\[-ipmi_ip sets the ip address for the ipmi channel  \] "
+append helpmessage	    "\n		\[-ipmi_default_gateway sets default gateway for the ipmi channel  \] "
+
+#Variables are set using command line arguments, except the passwords that aree prompted for.
+set applianceIP ""
+set applianceLogin ""
+set ipmiUser ""
+set ipmiIP ""
+set ipmiDefGW ""
+
+#Parameter setting
+for {set i 0} {$i < $argsLength} {incr i 1} {
+    set cur [lindex $argv $i]
+    if { $cur == "-h" } {
+	    puts $helpmessage
+	exit
+    } elseif { $cur == "-appliance_ip" } {
+	    set applianceIP [lindex $argv $i+1]
+    } elseif { $cur == "-appliance_user" } {
+	    set applianceLogin [lindex $argv $i+1]
+    } elseif { $cur == "-ipmi_user" } {
+	    set ipmiUser [lindex $argv $i+1]
+    } elseif { $cur == "-ipmi_ip" } {
+	    set ipmiIP [lindex $argv $i+1]
+    } elseif { $cur == "-ipmi_default_gateway" } {
+	    set ipmiDefGW [lindex $argv $i+1]
+    }
+}
+
+#Parameter validation
+if { $applianceIP == "" } {
+	puts "Error: No IP for MQ appliance found. Please use -appliance_ip <ip_address>. Use -h option to display help."
+	exit
+} elseif { $applianceLogin == "" } {
+    puts "Error: No username for MQ appliance found. Please use -appliance_user <user_name>. Use -h option to display help."
+    exit
+} elseif { $ipmiUser == "" } {
+    puts "Error: No username for ipmi found. Please use -ipmi_user <ipmi_user_name>. Use -h option to display help."
+    exit
+} elseif { $ipmiIP == "" } {
+    puts "Error: No IP address for ipmi channel found. Please use -ipmi_ip <ipmi_ip>. Use -h option to display help."
+    exit
+} elseif { $ipmiDefGW == "" } {
+    puts "Error: No default gateway for ipmi channel IP found. Please use -ipmi_default_gateway <ipmi_default_gateway>. Use -h option to display help."
+    exit
+}
+
+# If it doesn't see the expected line, timeout after 10 minutes.
+set timeout 600
+
+#grab the ipmi-user
+stty -echo
+send_user -- "appliance password:\n"
+expect_user -re "(.*)\n"
+send_user "\n"
+set appliancePassword $expect_out(1,string)
+
+#grab ipmi password
+send_user -- "ipmi password:\n"
+expect_user -re "(.*)\n"
+send_user "\n"
+stty echo
+set ipmiPass $expect_out(1,string)
+
+# Start the SSH session
+# May find it useful to add in -o StrictHostKeyChecking=no
+# to automatically answer yfirmwareSourceLocationwhether the host should be added 
+# to the list of known hosts.
+spawn ssh -o StrictHostKeyChecking=no $applianceIP
+
+#send login information
+expect "login:"
+send "$applianceLogin\n"
+expect "Password:"
+send "$appliancePassword\n"
+#wait for the prompt before continuing
+expect "#"
+
+#Config mode
+send "config\n"
+expect "#"
+
+#send the ipmi user crt command
+send "ipmi-user $ipmiUser\n"
+expect "#"
+
+send "password $ipmiPass\n"
+expect "#"
+
+send "exit\n"
+expect "#"
+
+send "ipmi-lan-channel mgt0\n"
+expect "#"
+
+send "allowed-user $ipmiUser operator\n"
+expect "#"
+
+send "ip address $ipmiIP\n"
+expect "#"
+
+send "ip default-gateway $ipmiDefGW\n"
+expect "#"
+
+send "maximum-channel-privilege-level operator\n"
+expect "#"
+
+send "exit\n"
+expect "#"
+
+send "write mem\n"
+expect ":"
+send "y\n"
+expect "#"
+
+send "exit\n"
+expect "#"
+
+send "exit\n"
+expect eof
