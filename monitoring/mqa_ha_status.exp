@@ -1,0 +1,127 @@
+#!/usr/bin/expect -f
+
+# (C) Copyright IBM Corporation 2016
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Uncomment to suppress normal output to stdout
+log_user 0
+# Uncomment for debug output
+#exp_internal 1
+
+set timeout 300
+
+set appliance1 $::env(MQA_appliance1)
+set appliance2 $::env(MQA_appliance2)
+set appliance1_name "Appliance1"
+set appliance2_name "Appliance2"
+set userid $::env(MQA_userid)
+set password $::env(MQA_password)
+
+proc sshLogin {id userid password namevar} {
+    upvar 1 $namevar name
+    expect -i $id "login:"
+    send -i $id "${userid}\n"
+    expect -i $id "Password:"
+    send -i $id "${password}\n"
+    expect -i $id "#"
+    send -i $id "show system\n"
+    expect -i $id "#"
+    set lines [split $expect_out(buffer) \n]
+    set variable [lindex $lines 1]
+    foreach line $lines {
+        set current_line $line
+        if {[string match "*name*" ${current_line}]} {
+            regexp ".* name: (.*)\r" $current_line matched_line name
+        }
+    }
+    send -i $id "mqcli\n"
+    return 0
+}
+
+proc sshLogout {id} {
+    send -i $id "exit\n"
+    expect -i $id "#"
+    send -i $id "exit\n"
+    expect -i $id eof
+    return 0
+}
+
+proc getStatus {id ip name} {
+    set memory      "error getting memory"
+    set cpu         "error getting cpu"
+    set disk         "error getting internal disk"
+    set system_volume         "error getting system volume"
+    set error_filesystem  "error getting error filesystem"
+    set trace_filesystem  "error getting trace filesystem"
+    set this_ha_status   "error getting HA status of this appliance"
+    set other_ha_status   "error getting HA status of the other appliance"
+
+    expect -i $id "(mqcli)#"
+    send -i $id "status\n"
+    expect -i $id "(mqcli)#"
+    set lines [split $expect_out(buffer) \n]
+    set variable [lindex $lines 1]
+    foreach line $lines {
+        set current_line $line
+        if {[string match "Memory*" ${current_line}]} {
+            regexp "Memory.*\\\[(.*)%\\\]" $current_line matched_line memory
+        } elseif {[string match "*CPU*" ${current_line}]} {
+            regexp "CPU: *(.*)%" $current_line matched_line cpu
+        } elseif {[string match "Internal disk*" ${current_line}]} {
+            regexp "Internal disk:.*\\\[(.*)%\\\]" $current_line matched_line disk
+        } elseif {[string match "System volume*" ${current_line}]} {
+            regexp "System volume:.*\\\[(.*)%\\\]" $current_line matched_line system_volume
+        } elseif {[string match "*MQ errors file system*" ${current_line}]} {
+            regexp "MQ errors file system:.*\\\[(.*)%\\\]" $current_line matched_line error_filesystem
+        } elseif {[string match "MQ trace file system:*" ${current_line}]} {
+            regexp "MQ trace file system:.*\\\[(.*)%\\\]" $current_line matched_line trace_filesystem
+        }
+    }
+
+    send -i $id "dsphagrp\n"
+    expect -i $id "(mqcli)#"
+    set lines [split $expect_out(buffer) \n]
+    set variable [lindex $lines 1]
+    foreach line $lines {
+        set current_line $line
+        if {[string match "This Appliance:*" ${current_line}]} {
+            regexp ".*This Appliance: *(.*)\r" $current_line matched_line this_ha_status
+        } elseif {[string match "Appliance *:*" ${current_line}]} {
+            regexp ".*Appliance.*: *(.*)\r" $current_line matched_line other_ha_status
+        }
+    }
+
+    send_user "$ip,$name,$memory,$cpu,$disk,$system_volume,$error_filesystem,$trace_filesystem,$this_ha_status,$other_ha_status\n"
+    send -i $id "\n"
+    return 0
+}
+
+spawn ssh -o StrictHostKeyChecking=no ${appliance1}
+set a1id $spawn_id
+
+spawn ssh -o StrictHostKeyChecking=no ${appliance2}
+set a2id $spawn_id
+
+sshLogin $a1id $userid $password appliance1_name
+sshLogin $a2id $userid $password appliance2_name
+
+set carry_on_looping 1
+while { $carry_on_looping == 1 } {
+    getStatus $a1id $appliance1 $appliance1_name
+    getStatus $a2id $appliance2 $appliance2_name
+    sleep 5
+}
+
+sshLogout $a1id
+sshLogout $a2id
