@@ -13,7 +13,7 @@ The scripts were tested with the 8.0.0.5-IBM-MQ-Appliance-IT16174 interim fix.
 
 ## Monitor an HA Queue Manager
 
-The expect script for this is mqa_ha_qm_status.expect
+The expect script for this is mqa_ha_qm_status.exp
 
 This script is configured with information about two Appliances, that are configured as an HA Group, and one queue manager. The script connects to the appliances and periodically (every five seconds) issues the mqcli status command for the queue manager on each appliance. It outputs one line of output for each queue manager each time it issues the status command.
 
@@ -70,7 +70,7 @@ HA preferred location:                   Other appliance
 
 ## Monitor an Appliance HA Group
 
-The expect script for this is mqa_ha_status.exp.
+The expect script for this is mqa_ha_status.exp
 
 This script is configured with information about two appliances that are configured as an HA Group. The script connects to each of the appliances and periodically (every five seconds) issues the mqcli `status` command, without a queue manager name, to get information about the CPU, disk and memory usage of the appliance as a whole. It then runs the mqcli `dsphagrp` command to get the HA status of the two appliances in the HA Group.
 
