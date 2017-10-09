@@ -16,3 +16,5 @@ This script retrieves the current CPU usage of the appliance every two seconds. 
 This script retrieves the current memory usage of the appliance, as well as the used and total memory available.
 ## viewMQSystemResources.js
 This script retrieves the storage information on the appliance, including amount of used storage, total available, user error storage, and etc.
+## getQueueManagerErrorLog.js
+This script downloads a queue manager error log from an appliance (e.g. AMQERR01.LOG).
