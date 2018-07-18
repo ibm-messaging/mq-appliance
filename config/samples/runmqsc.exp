@@ -1,0 +1,122 @@
+#!/usr/bin/expect
+
+# ************************************************************************************************
+# Copyright (c) 2018 IBM Corporation and other Contributors.
+#
+# All rights reserved. This program and the accompanying materials
+# are made available under the terms of the Eclipse Public License v1.0
+# which accompanies this distribution, and is available at
+# http://www.eclipse.org/legal/epl-v10.html
+# ************************************************************************************************
+#
+# Execute a list of MQSC commands from a file against a MQ Appliance queue manager              
+#
+# Usage: runmqsc.exp <user> <password> <server> <qm_name> <mqsc_file>
+#
+#    <user>		 User name to connect to the appliance
+#    <password>	 Password of the user connecting to the appliance
+#	 <server>	 IP or DNS of the appliance to connect to
+#    <qm_name>   Name of the queue manager
+#    <mqsc_file> Name of the file containing the MQSC commands (fullpath)
+#
+# The script returns the following values:
+#
+#    0: Success - runmqsc completed successfully
+#    1: Failure - an error occurred, check the error messages in the output
+#    2: Failure - an invalid number of parameters were passed, the script did not run
+#
+# ************************************************************************************************
+
+set timeout 30
+
+set command "runmqsc"
+
+# Check parameters are provided
+if { [llength $argv] < 5 } {
+   puts "Invalid number of parameters provided!"
+   puts "Usage: runmqsc.exp <user> <password> <server> <qm_name> <mqsc_file>"
+   puts "   <user>	    User name to connect to the appliance"
+   puts "   <password)	Password of the user connecting to the appliance"
+   puts "   <server>	IP or DNS of the appliance to connect to"
+   puts "   <qm_name>   Name of the queue manager"
+   puts "   <mqsc_file> Name of the file containing the MQSC commands (fullpath)"
+   exit 2
+}
+
+# Parse parameters
+set userid   [lindex $argv 0]
+set password [lindex $argv 1]
+set ipaddr   [lindex $argv 2]
+set qmname   [lindex $argv 3]
+set mqscfile [lindex $argv 4]
+
+set systemTime [clock seconds]
+puts [clock format $systemTime -format {Started %a %b %d %Y at %H:%M:%S}]
+
+# Read MQSC commands from file
+puts "Reading MQSC commands from file '$mqscfile'..."
+set fp [open $mqscfile r]
+set mqsc [read -nonewline $fp]
+close $fp
+
+# Start the SSH session to the MQ apliance
+puts "Connecting to '$ipaddr' using user '$userid' to run runmqsc..."
+spawn ssh -o StrictHostKeyChecking=no $ipaddr
+
+# Login to the appliance
+expect {
+    eof {
+	    send_user "SSH connection to '$ipaddr' failed!\n"
+		exit 1
+	}
+	timeout {
+		send_user "Login to the appliance timed out!\n"
+		exit 1
+	}
+	"login:" {
+		send "$userid\r"
+		exp_continue
+	}
+	"Password:" {
+		send "$password\r"
+		expect {
+		    timeout {
+			   send_user "\nInvalid login credentials!\n"
+               exit 1			   
+			}
+		    "mqa#" { 
+			}
+		}
+	}
+}
+
+# Enter MQ configuration mode
+send "mqcli\n"
+expect "(mqcli)#"
+
+# Run runmqsc
+send "$command $qmname\n"
+send "$mqsc\nend\n"
+expect {
+    "not be processed." { set failure 1 }
+    "were processed." { set failure 0 }
+}
+expect "(mqcli)#"
+
+# Terminate SSH session
+send "exit\n"
+expect "#"
+send "exit\n"
+expect eof
+
+set systemTime [clock seconds]
+puts [clock format $systemTime -format {Ended %a %b %d %Y at %H:%M:%S}]
+
+# Exit
+if {$failure} {
+   puts "Command '$command' ended in error, check previous error messages!\n"
+   exit 1
+} else {
+   puts "Command '$command' successfully completed.\n"
+   exit 0
+}   
