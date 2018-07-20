@@ -13,9 +13,9 @@
 #
 # Usage: runmqsc.exp <user> <password> <server> <qm_name> <mqsc_file>
 #
-#    <user>		 User name to connect to the appliance
+#    <user>	 User name to connect to the appliance
 #    <password>	 Password of the user connecting to the appliance
-#	 <server>	 IP or DNS of the appliance to connect to
+#    <server>	 IP or DNS of the appliance to connect to
 #    <qm_name>   Name of the queue manager
 #    <mqsc_file> Name of the file containing the MQSC commands (fullpath)
 #
@@ -35,7 +35,7 @@ set command "runmqsc"
 if { [llength $argv] < 5 } {
    puts "Invalid number of parameters provided!"
    puts "Usage: runmqsc.exp <user> <password> <server> <qm_name> <mqsc_file>"
-   puts "   <user>	    User name to connect to the appliance"
+   puts "   <user>	User name to connect to the appliance"
    puts "   <password)	Password of the user connecting to the appliance"
    puts "   <server>	IP or DNS of the appliance to connect to"
    puts "   <qm_name>   Name of the queue manager"
