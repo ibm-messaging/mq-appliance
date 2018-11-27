@@ -48,8 +48,8 @@ source ./restHelperLibrary.sh
 
 #===============================================================================
 # Show AUTHSERV component is set for a given queue manager
-function listQueueManagers {
-  controlName='listQueueManagers'
+function disAuthServiceForQmgrs {
+  controlName='disAuthServiceForQmgrs'
   REST_MQSC='DIS AUTHSERV ALL'
   ERROR_FILE_NAME=$controlName"_"$qmgr"_runmqscRest.json"
   runmqscRest
@@ -141,7 +141,7 @@ qmgrs=( $qmgrNames )
 # For loop for all queue managers
 for qmgr in "${qmgrs[@]}"
 do
-	listQueueManagers
+	disAuthServiceForQmgrs
   disAuthrec
   getQmgrDump
 done
