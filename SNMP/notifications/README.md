@@ -219,8 +219,10 @@ I entered a Security Name of mqtraptest
 I entered a Security Level of No Authentication, No Privacy
 
 On the Linux server where I run snmptrapd I added the following to the snmptrapd.conf file:
+<pre>
 createUser -e 0x8000395d0374fe48084361 mqtraptest
 authUser log mqtraptest noauth
+</pre>
 
 As I have used noauth I do not have to supply a password.
 
