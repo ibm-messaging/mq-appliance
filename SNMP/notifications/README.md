@@ -200,4 +200,54 @@ SNMPv2-MIB::snmpTrapEnterprise.0 = OID: IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNot
 
 # SNMP v3
 
-Work in progress.
+The main difference in SNMP v3 is in security. Rather than using communities you have to create one or more users in the system receiving the traps, including the SNMP engine ID of the system sending traps, and configure the systems sending traps with the correct user to use.
+
+I configured my other Appliance to use SNMP v3 so I am using a mixture of v2c and v3 talking to the same instance of snmptrapd.
+
+To find the SNMP engine ID of an MQ Appliance you have to go to the SNMP Settings page, Status > Other Network > SNMP Status.
+
+In my case the SNMPv3 engineID is 0x8000395d0374fe48084361
+
+In the SNMP Settings I used the same IP address I used for v2c.
+
+I entered a Remote Port of 162
+
+I set the Version to 3
+
+I entered a Security Name of mqtraptest
+
+I entered a Security Level of No Authentication, No Privacy
+
+On the Linux server where I run snmptrapd I added the following to the snmptrapd.conf file:
+createUser -e 0x8000395d0374fe48084361 mqtraptest
+authUser log mqtraptest noauth
+
+As I have used noauth I do not have to supply a password.
+
+I then started snmptrapd again.
+
+On the Appliance configured to use SNMPv3 I generated a log event to test the SNMP v3 trap. I used the same values as before.
+
+After a short delay I saw the trap logged by snmptrapd:
+<pre>
+DISMAN-EVENT-MIB::sysUpTimeInstance = Timeticks: (814090796) 94 days, 5:21:47.96	
+
+SNMPv2-MIB::snmpTrapOID.0 = OID: IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqLogInternalNotification	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationType.0 = INTEGER: <b>qmgr</b>(282)	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationSeverity.0 = INTEGER: <b>error</b>(4)	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationTime.0 = STRING: Fri Nov 01 2019 14:53:13	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationTransId.0 = Gauge32: 0	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationText.0 = STRING: <b>debug log event</b>	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationDomain.0 = STRING: default	
+
+IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationEventCode.0 = STRING: <b>0x8d003594</b>	
+
+SNMPv2-MIB::snmpTrapEnterprise.0 = OID: IBM-MQ-APPLIANCE-NOTIFICATION-MIB::mqNotificationDefinitions
+
+</pre>
