@@ -48,7 +48,7 @@ The c relates to the use of communities for security. In this example I will use
 
 I used the standard Linux tool snmptrapd to receive the traps from my Appliances.
 
-I copied the file mqNotificationMIB.txt from one of my Appliances to that directory, before running snmptrapd.
+I copied the file mqNotificationMIB.txt from one of my Appliances to the directory /usr/share/snmp/MIBs, which is the default location for MIBs, before running snmptrapd.
 
 I created a file snmptrapd.conf in the home directory of the root user on my Linux system, containing the single line:
 <pre>
