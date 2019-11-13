@@ -3,7 +3,13 @@ The IBM MQ Appliance provides an SSH interface for executing commands from a rem
 
 This MQ CLI client can be used to simplify scripts on remote systems by hiding the use of *expect*. A command can be supplied to the client as a parameter, or commands can be supplied using standard input (either interactively or piped in from a file), which makes it easy to script commands as per on other MQ server platforms.
 
-The client is provided as a Perl script because Perl is usually installed on most UNIX and Linux systems. The Expect Perl module, which the client uses, is not usually provided with a default Perl installation, but it can be readily downloaded from CPAN (Comprehensive Perl Archive Network), which is the public repository for a wide range of Perl modules. CPAN is available at www.cpan.org. Perl installations include a *cpan* utility that can be used to download Perl modules and prerequisites they require.
+In the interactive mode a custom command is available that can be used to change the expect timeout for subsequent commands that are executed in the session. This command is useful when executing commands that are potentially long-running. To set the timeout use the command *timeout <seconds>*. For example, to set the timeout to 30 seconds use *timeout 30*.
+
+Two implementations of the client are provided; one written in Perl (*mqcli.pl*) and another written in Python (*mqcli.py*). These scripting languages are commonly installed on UNIX and Linux systems.
+
+The Expect module used by the Python client is often provided as a separate package on Linux, named either *python-pexpect* or *pexpect*. Alternatively, the module can be downloaded from the Python Package Index https://pypi.org using the *pip* utility.
+
+The Expect module used by the Perl client is not usually provided with a default Perl installation, but it can be readily downloaded from CPAN (Comprehensive Perl Archive Network), which is the public repository for a wide range of Perl modules. CPAN is available at www.cpan.org. Perl installations include a *cpan* utility that can be used to download Perl modules and prerequisites they require.
 
 ## Usage
 
@@ -52,7 +58,7 @@ a potentially long-running command.
 
 ## Example 1: Execute a single command
 
-This example illustrates how to use the client to execute a single command by providing the hostname, the credentials and the command using parameters.
+This example illustrates how to use the Perl client to execute a single command by providing the hostname, the credentials and the command using parameters.
 
 ```
 $ mqcli.pl -a mqappl1 -u admin -p abcd1234 -c dspmqver
