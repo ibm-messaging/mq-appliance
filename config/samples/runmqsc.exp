@@ -64,7 +64,7 @@ puts [clock format $systemTime -format {Started %a %b %d %Y at %H:%M:%S}]
 # Read MQSC commands from file
 puts "Reading MQSC commands from file '$mqscfile'..."
 set fp [open $mqscfile r]
-set mqsc [read -nonewline $fp]
+set lines [split [read $fp] "\n"]
 close $fp
 
 # Start the SSH session to the MQ apliance
@@ -104,11 +104,20 @@ expect "(mqcli)#"
 
 # Run runmqsc
 send "$command $qmname\n"
-send "$mqsc\nend\n"
+foreach line $lines {
+   if {[string trim $line] != ""} {
+      send "$line\n"
+	  expect "AMQ"
+   }
+}
+
+send "end\n"
+   
 expect {
     "not be processed." { set failure 1 }
     "were processed." { set failure 0 }
 }
+
 expect "(mqcli)#"
 
 # Terminate SSH session
