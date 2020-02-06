@@ -17,7 +17,7 @@
 #
 # ************************************************************************************************
 #
-# Execute a list of MQSC commands from a file against a MQ Appliance queue manager              
+# Execute a list of MQSC commands (one liner) from a file against a MQ Appliance queue manager              
 #
 # Usage: runmqsc.exp <user> <password> <server> <qm_name> <mqsc_file>
 #
@@ -104,17 +104,21 @@ expect "(mqcli)#"
 
 # Run runmqsc
 send "$command $qmname\n"
+
 foreach line $lines {
-   if {[string trim $line] != ""} {
-      send "$line\n"
-	  expect "AMQ"
-   }
+   set line [string trim $line]
+   if {$line == ""} continue
+   if {[string first * $line] == 0} continue
+
+   send "$line\n"
+   expect "AMQ"
 }
 
 send "end\n"
    
 expect {
     "not be processed." { set failure 1 }
+    "has a syntax error." { set failure 1 }
     "were processed." { set failure 0 }
 }
 
