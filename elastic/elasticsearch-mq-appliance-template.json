@@ -2,7 +2,7 @@
   /* -------------------------------------------------------------------------- */
   /* Sample Elasticsearch 6.5.0 mapping for IBM MQ Appliance syslog log targets */
   /*                                                                            */
-  /* Copyright 2018 IBM Corporation                                             */
+  /* Copyright 2018, 2020 IBM Corporation                                       */
   /*                                                                            */
   /* Licensed under the Apache License, Version 2.0 (the "License");            */
   /* you may not use this file except in compliance with the License.           */
@@ -57,6 +57,24 @@
           "ignore_above" : 256
         },
         "message" : {
+          "type" : "text"
+        },
+        "mq-arithinsert1" : {
+          "type" : "integer"
+        },
+        "mq-arithinsert2" : {
+          "type" : "integer"
+        },
+        "mq-commentinsert1" : {
+          "type" : "text"
+        },
+        "mq-commentinsert2" : {
+          "type" : "text"
+        },
+        "mq-commentinsert3" : {
+          "type" : "text"
+        },
+        "mq-extended" : {
           "type" : "text"
         },
         "msgid" : {
