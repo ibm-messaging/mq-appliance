@@ -1,7 +1,7 @@
 #!/usr/bin/expect
 ########################################################################
 #
-# Copyright 2016 IBM Corporation and other contributors
+# Copyright 2016, 2021 IBM Corporation and other contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,15 +36,20 @@
 
 ########################################################################
 ##                                                                    ##
-##              THE FOLLOWING VARIABLES MUST BE CHANGED TO SUIT       ## 
-##                         YOUR APPLIANCE!                            ##
+##            THE FOLLOWING VARIABLES MAY BE CHANGED TO SUIT          ## 
+##                          YOUR APPLIANCE                            ##
 ##                                                                    ##
 ########################################################################
 
-#Change this to your appliance IP
-set applianceIP "127.0.0.1"
-#Change this to your appliance login
-set applianceLogin "admin"
+# Change this to your default appliance hostname or IP address
+set applianceHost ""
+
+# Change this to your default appliance user
+set applianceUser "admin"
+
+# Passwords are usually specified interactively or as parameters
+set appliancePassword ""
+set backupLocationPassword ""
 
 ########################################################################
 ##                                                                    ##
@@ -55,89 +60,138 @@ set applianceLogin "admin"
 # If it doesn't see the expected line, timeout after 10 minutes.
 set timeout 600
 
-#parse arguments
+# Parse arguments
 set argsLength [llength $argv]
 
-#initialize argument variables
+# Initialize argument variables
 set helpmessage             "usage: expect backup.exp "
-append helpmessage          "\n         \[-appliance_password sets the password for the appliance\] "
+append helpmessage          "\n         \[ -appliance_host <appliance hostname or IP address> \] "
+append helpmessage          "\n         \[ -appliance_password <appliance password> \] "
+append helpmessage          "\n         \[ -appliance_user <appliance user> \] "
+append helpmessage          "\n         \[ -backup_password <backup location password> \] "
+append helpmessage          "\n"
 
-#Passwords are specified as parameters and validated to avoid hard coding
-set appliancePassword ""
-
-#Parameter setting
+# Parameter setting
 for {set i 0} {$i < $argsLength} {incr i 1} {
     set cur [lindex $argv $i]
     if { $cur == "-h" } {
             send $helpmessage
         exit
+    } elseif { $cur == "-appliance_host" } {
+            set applianceHost [lindex $argv $i+1]
+            incr i 1
     } elseif { $cur == "-appliance_password" } {
             set appliancePassword [lindex $argv $i+1]
+            incr i 1
+    } elseif { $cur == "-appliance_user" } {
+            set applianceUser [lindex $argv $i+1]
+            incr i 1
+    } elseif { $cur == "-backup_password" } {
+            set backupLocationPassword [lindex $argv $i+1]
+            incr i 1
     }
 }
 
-#Parameter validation
-if { $appliancePassword == "" } {
-        send "Error: No password for MQ appliance found. Please use -appliance_password <password>. Use -h option to display help.\n"
-        exit
+# Prompt for the appliance host if not provided
+if { $applianceHost == "" } {
+    send_user -- "Enter the appliance hostname or IP address: "
+    expect_user -re "(.*)\n"
+    set applianceHost $expect_out(1,string)
+
+    if { $applianceHost == "" } {
+        send "Error: No appliance hostname provided. Use -appliance_host <hostname or IP address> or enter interactively. Use -h option to display help.\n"
+        exit;
+    }
 }
 
-#Set up the SCP location for the appliance to write backup files to.
-#Get current working directory
+# Prompt for the appliance password if not provided
+if { $appliancePassword == "" } {
+    stty -echo
+    send_user -- "Enter password for user $applianceUser at appliance $applianceHost: "
+    expect_user -re "(.*)\n"
+    send_user "\n"
+    stty echo
+    set appliancePassword $expect_out(1,string)
+
+    if { $appliancePassword == "" } {
+        send "Error: No password provided for the appliance. Use -appliance_password <password> or enter interactively. Use -h option to display help.\n"
+        exit;
+    }
+}
+
+# Set up the SCP location for the appliance to write backup files to.
+# Get current working directory
 set curDir [exec pwd]
-#Get hostname of machine
+
+# Get hostname of machine
 set hostname $::env(HOSTNAME)
-#Get the current user
+
+# Get the current user
 set user [exec whoami]
 
-#Create a folder to back up to
+# Create a folder to back up to
 set clockFormat [clock format [clock seconds] -format %Y%m%d%H%M%S]
 set backupFolder "applianceBackup$clockFormat"
 exec mkdir $backupFolder
 
-#Set the backup location
+# Set the backup location
 set backupLocation "scp://$user@$hostname/$curDir/applianceBackup$clockFormat"
 
-# grab the password
-stty -echo
-send_user -- "Password for $user@$hostname: "
-expect_user -re "(.*)\n"
-send_user "\n"
-stty echo
-set backupLocationPassword $expect_out(1,string)
+# Obtain the backup location password if not provided
+if { $backupLocationPassword == "" } {
+    stty -echo
+    send_user -- "Enter password for user $user at backup location $hostname: "
+    expect_user -re "(.*)\n"
+    send_user "\n"
+    stty echo
+    set backupLocationPassword $expect_out(1,string)
+
+    if { $backupLocationPassword == "" } {
+        send "Error: No password provided for the backup location. Use -backup_password <password> or enter interactively. Use -h option to display help.\n"
+        exit;
+    }
+}
 
 # Start the SSH session
 # May find it useful to add in -o StrictHostKeyChecking=no
 # to automatically answer yes to whether the host should be added 
 # to the list of known hosts.
-spawn ssh $applianceIP
+spawn ssh $applianceHost
 
-#send login information
+# Send login information
 expect "login:"
-send "$applianceLogin\n"
+send "$applianceUser\n"
 expect "Password:"
 send "$appliancePassword\n"
-#wait for the prompt before continuing
-expect "#"
 
-#Config mode
+# Wait for the prompt before continuing
+expect {
+        "login:" {
+                send_error "Failed to login to the appliance\n"
+                exit;
+        }
+        "#" {
+        }
+}
+
+# Config mode
 send "config\n"
 expect "#"
 
-#Back up appliance configuration.
+# Back up appliance configuration.
 send "write memory\n"
 expect "Overwrite"
 send "y\n"
 expect "#"
 
-#copy appliance configuration to backup location
+# Copy appliance configuration to backup location
 send "copy config:///autoconfig.cfg $backupLocation\n"
 
 expect {
         "Password" {
                 send "$backupLocationPassword\n"
         }
-        #If we see a percentage sign this entails error
+        # If we see a percentage sign this entails error
         "%" {
                 send "exit\n"
                 expect "#"
@@ -152,7 +206,7 @@ expect {
         "File copy success" {
                 expect "#"
         }
-        #If we see a percentage sign this entails error
+        # If we see a percentage sign this entails error
         "%" {
                 send "exit\n"
                 expect "#"
@@ -167,7 +221,7 @@ expect "#"
 send "mqcli\n"
 expect "#"
 
-#Back up messaging users
+# Back up messaging users
 send "userbackup -f user_backup\n"
 expect "#"
 
@@ -176,7 +230,7 @@ expect "#"
 send "config\n"
 expect "#"
 
-#copy appliance users to backup location
+# Copy appliance users to backup location
 send "copy mqbackup:///user_backup $backupLocation\n"
 expect "Password"
 send "$backupLocationPassword\n"
@@ -185,7 +239,7 @@ expect {
         "File copy success" {
                 expect "#"
         }
-        #If we see a percentage sign this entails error
+        # If we see a percentage sign this entails error
         "%" {
                 send "exit\n"
                 expect "#"
@@ -200,7 +254,7 @@ expect "#"
 send "mqcli\n"
 expect "#"
 
-#Get list of Queue Managers
+# Get list of Queue Managers
 send "dspmq\n"
 expect "#"
 
@@ -210,7 +264,7 @@ set records [split $myVar "\n"]
 
 set qmNames [list]
 
-## Iterate over the records
+# Iterate over the records
 foreach rec $records {
         set matched ""
         set expressionMatch [regexp {QMNAME\((.+?)\)} $rec matched sub1 sub2]
@@ -223,63 +277,68 @@ foreach qm $qmNames {
         puts "QM found: $qm"
 }
 
-#Back up key repository (PER QM)
+# Back up key repository (PER QM)
 foreach qm $qmNames {
-        #Send key back up command per QM
+        # Send key back up command per QM
         send "keybackup -m $qm\n"
         expect "Do you wish to continue?"
         send "Y\n"
         
-        #These two expect statements will store the password of the key back up in the expect buffer, so we can extract the password.
+        # These two expect statements will store the password of the key back up in the expect buffer, so we can extract the password.
         expect "'."
-        expect "#"
+        expect "(mqcli)#"
         
-        #Find the actual password from the expect buffer using a reg exp.
+        # Find the actual password from the expect buffer using a reg exp.
         set myVar "$expect_out(buffer)\n"
-        puts "MYVAR: $myVar"
+
+        # Uncomment this line to debug capturing of the password
+        # puts "MYVAR: $myVar"
         
-        set expressionMatch [regexp {Password for key repository is:\s*(\S+)} $myVar matched sub1]
+        set expressionMatch [regexp {Password for key repository is:\s*([^\n]+)\n} $myVar matched sub1]
         
-        #If a match has been found to the reg exp store the password in a file named after the QM.
+        # If a match has been found to the reg exp store the password in a file named after the QM.
         if { $expressionMatch == 1 } {
                 set filename "$qm\keybackup_password.txt"
-                # open the filename for writing
+
+                # Open the filename for writing
                 set fileId [open $filename "w"]
-                #Add the password to the file with name $filename
+
+                # Add the password to the file with name $filename
                 puts $fileId $sub1
-                # close the file, ensuring the data is written out before you continue
-                #  with processing.
+
+                # Close the file, ensuring the data is written out before you continue with processing.
                 close $fileId
-                #Move it to back up folder!!
+
+                # Move it to back up folder!!
                 exec mv $filename $backupFolder 
         }
-        
-        
 
-        #Back up QM.INI
+        # Back up QM.INI
         send "dspmqini -m $qm\n"
         expect "#"
         
         set filename "$qm.ini"
-        # open the filename for writing
+
+        # Open the filename for writing
         set fileId [open $filename "w"]
-        #Add the password to the file with name $filename
+
+        # Add the password to the file with name $filename
         puts $fileId $expect_out(buffer)
-        # close the file, ensuring the data is written out before you continue
-        #  with processing.
+
+        # Close the file, ensuring the data is written out before you continue with processing.
         close $fileId
-        #Move it to back up folder!!
+
+        # Move it to back up folder!!
         exec mv $filename $backupFolder 
         
-        #Back up QMs (PER QM)
+        # Back up QMs (PER QM)
         send "strmqm $qm\n"
         expect "#"
         
-        #Back up QMs (PER QM)
+        # Back up QMs (PER QM)
         send "dmpmqcfg -m $qm -a\n"
         expect {
                 "#" {
-                        
                 }
                 "AMQ8146" {
                         send "exit\n"
@@ -295,7 +354,7 @@ foreach qm $qmNames {
         send "config\n"
         expect "#"
         
-        #copy qm cfg back up to backup location
+        # Copy qm cfg back up to backup location
         send "copy mqbackup:///$qm.cfg $backupLocation\n"
         expect "Password"
         send "$backupLocationPassword\n"
@@ -304,7 +363,7 @@ foreach qm $qmNames {
                 "File copy success" {
                         expect "#"
                 }
-                #If we see a percentage sign this entails error
+                # If we see a percentage sign this entails error
                 "%" {
                         send "exit\n"
                         expect "#"
@@ -313,7 +372,7 @@ foreach qm $qmNames {
                 }
         }
         
-        #copy qm key repos back up to backup location
+        # Copy qm key repos back up to backup location
         send "copy mqbackup:///$qm\_keyrepos.tar.gz $backupLocation\n"
         expect "Password"
         send "$backupLocationPassword\n"
