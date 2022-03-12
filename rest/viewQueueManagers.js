@@ -52,11 +52,18 @@ var req = https.request(options, function(res) {
     }
     else if (responseObject.QueueManagersStatus !== undefined) {
       console.log('Queue managers on ' + host + ':');
-      var i = 0;
-      while (responseObject.QueueManagersStatus[i] !== undefined) {
-        console.log(responseObject.QueueManagersStatus[i].Name + ' : ' +
-                    responseObject.QueueManagersStatus[i].Status);
-        i++;
+      // if we have only one QM the while loop won't work, we need this :
+      if (responseObject.QueueManagersStatus[i] == undefined) {
+        console.log(responseObject.QueueManagersStatus.Name + ' : ' +
+                    responseObject.QueueManagersStatus.Status);
+      }
+      else {
+        var i = 0;
+        while (responseObject.QueueManagersStatus[i] !== undefined) {
+          console.log(responseObject.QueueManagersStatus[i].Name + ' : ' +
+                      responseObject.QueueManagersStatus[i].Status);
+          i++;
+        }
       }
     }
     else {
