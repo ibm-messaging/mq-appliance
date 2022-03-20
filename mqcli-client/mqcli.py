@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 
 ################################################################################
-# Copyright 2019 IBM Corporation
+# Copyright 2019, 2022 IBM Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 # http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,7 +27,6 @@
 
 import argparse
 import os
-import pexpect
 import re
 import sys
 import textwrap
@@ -35,11 +34,17 @@ import time
 
 from getpass import getpass
 
+import pexpect
+
+# Constants for command types
+COMMAND_TYPE_MQCLI = 1
+COMMAND_TYPE_RUNMQSC = 2
+
 ################################################################################
 # Display a command prompt
 ################################################################################
 
-def display_prompt():
+def display_prompt(command_type=COMMAND_TYPE_MQCLI):
     '''Display a command prompt'''
 
     # Strip the domain from the appliance hostname (if any)
@@ -49,11 +54,15 @@ def display_prompt():
 
     if match:
         # Not an IP address, strip the domain
-        tokens   = hostname.split('.')
+        tokens = hostname.split('.')
         hostname = tokens[0]
 
     # Display the command prompt
-    sys.stdout.write('[' + args.username + '@' + hostname + ' mqcli]$ ')
+    if command_type == COMMAND_TYPE_MQCLI:
+        sys.stdout.write('[' + args.username + '@' + hostname + ' mqcli]$ ')
+    else:
+        sys.stdout.write('[' + args.username + '@' + hostname + ' runmqsc]$ ')
+
     sys.stdout.flush()
 
 ################################################################################
@@ -74,7 +83,7 @@ def fatal(message='Unexpected error'):
 
     error(message + '\n')
 
-    if child != None:
+    if child is not None:
         child.close()
 
     sys.exit(1)
@@ -99,6 +108,7 @@ def get_arguments():
             - APPLIANCENAME : The hostname or IP address of the appliance
             - APPLIANCEUSER : The username of the MQ administrator on the appliance
             - APPLIANCEPASS : The password for the MQ administrator
+            - MQPROMPT      : Configured runmqsc command prompt
 
             If credentials are not specified on the command line, or by using
             environment variables, then the user is prompted to enter them
@@ -107,6 +117,13 @@ def get_arguments():
             In interactive mode the expect timeout can be modified for subsequent
             commands by entering 'timeout <seconds>'. This is useful when executing
             a potentially long-running command.
+
+            A custom runmqsc command prompt is required to execute MQSC commands by
+            using this client. To configure a custom runmqsc command prompt you set
+            the global MQPROMPT environment variable on the appliance by using the
+            setmqvar command in the mqcli. You then provide the configured prompt to
+            this client by using either the -m parameter, or by setting the same
+            environment variable locally.
             """)
     )
 
@@ -117,45 +134,50 @@ def get_arguments():
     modes = parser.add_mutually_exclusive_group(required=True)
 
     modes.add_argument('-c', '--command',
-        dest='command',
-        metavar='command',
-        help='A single MQ control command to execute')
+                       dest='command',
+                       metavar='command',
+                       help='A single MQ control command to execute')
 
     modes.add_argument('-i', '--interactive',
-        dest='interactive',
-        action='store_true',
-        help='Interactive mode')
+                       dest='interactive',
+                       action='store_true',
+                       help='Interactive mode')
 
     # ---------------------
     # Add the other options
     # ---------------------
 
     parser.add_argument('-a', '--appliance',
-        dest='appliance',
-        metavar='appliance',
-        help='The hostname or IP address of the appliance')
+                       dest='appliance',
+                       metavar='appliance',
+                       help='The hostname or IP address of the appliance')
+
+    parser.add_argument('-m', '--mqprompt',
+                       dest='mqprompt',
+                       metavar='mqprompt',
+                       help='The configured runmqsc command prompt')
 
     parser.add_argument('-u', '--username',
-        dest='username',
-        metavar='username',
-        help='The username of the MQ administrator on the appliance')
+                       dest='username',
+                       metavar='username',
+                       help='The username of the MQ administrator on the appliance')
 
     parser.add_argument('-p', '--password',
-        dest='password',
-        metavar='password',
-        help='The password for the MQ administrator')
+                       dest='password',
+                       metavar='password',
+                       help='The password for the MQ administrator')
 
     parser.add_argument('-s', '--sshoptions',
-        dest='sshoptions',
-        metavar='options',
-        help='Extra SSH command line options, if required')
+                       dest='sshoptions',
+                       metavar='options',
+                       help='Extra SSH command line options, if required')
 
     parser.add_argument('-t', '--timeout',
-        dest='timeout',
-        metavar='seconds',
-        help='The timeout to use for expect in seconds',
-        type=int,
-        default=60)
+                       dest='timeout',
+                       metavar='seconds',
+                       help='The timeout to use for expect in seconds',
+                       type=int,
+                       default=60)
 
     # ------------------------------------------------------
     # Parse the arguments and return the generated namespace
@@ -170,7 +192,7 @@ def get_arguments():
 def prompt_password():
     """Prompt for appliance user's password"""
 
-    while args.password == None:
+    while args.password is None:
         try:
             password = getpass('password: ')
         except EOFError:
@@ -199,7 +221,7 @@ def prompt_username():
         sys.stdout.flush()
 
         username = sys.stdin.readline()
-        
+
         # Give up if we get EOF
         if username == '':
             print()
@@ -215,15 +237,33 @@ def prompt_username():
 # Execute an MQ control command
 ################################################################################
 
-def run_command(command=''):
+def run_command(command='', command_type=COMMAND_TYPE_MQCLI):
     '''Execute an MQ control command'''
+
+    # Check if we are starting runmqsc
+    if re.match(r'runmqsc', command):
+        command_type = COMMAND_TYPE_RUNMQSC
 
     # Send the command
     child.sendline(command)
 
     # Wait for command prompt, which means the command has completed
     try:
-        child.expect_exact('mqa(mqcli)# ', timeout=args.timeout)
+        if command_type == COMMAND_TYPE_MQCLI:
+            # Match the mqcli command prompt
+            child.expect_exact('mqa(mqcli)# ', timeout=args.timeout)
+        elif command_type == COMMAND_TYPE_RUNMQSC:
+            if args.mqprompt is not None:
+                # Match the mqcli command prompt (runmqsc ends), or the configured runmqsc prompt
+                index = child.expect_exact(['mqa(mqcli)# ', args.mqprompt], timeout=args.timeout)
+
+                if index == 0:
+                    # We matched the mqcli command prompt so runmqsc has ended
+                    command_type = COMMAND_TYPE_MQCLI
+            else:
+                # The runmqsc command has a blank command prompt by default,
+                # which we cannot match on
+                fatal('A custom runmqsc command prompt is required to execute MQSC commands')
     except (pexpect.EOF, pexpect.TIMEOUT):
         fatal('Failed to execute an MQ command')
 
@@ -234,21 +274,24 @@ def run_command(command=''):
         if line > 0:
             print(lines[line])
 
+    # Return the command type we expect next
+    return command_type
+
 ################################################################################
 # Execute MQ control commands read from standard input
 ################################################################################
 
-def run_interactive():
+def run_interactive(command_type=COMMAND_TYPE_MQCLI):
     '''Execute MQ control commands read from standard input'''
 
     saved_timeout = args.timeout
-    end           = False
+    end = False
 
     while not end:
         # Display a command prompt
-        display_prompt()
+        display_prompt(command_type)
 
-        # Get the next command from the user   
+        # Get the next command from the user
         command = sys.stdin.readline()
 
         # Map EOF to 'exit'
@@ -264,7 +307,7 @@ def run_interactive():
             print(command)
 
         # Execute the command unless we've been asked to exit
-        if re.match('^(exit|top)$', command):
+        if ((re.match('^(exit|top)$', command)) and (command_type != COMMAND_TYPE_RUNMQSC)):
             end = True
         else:
             match = re.match(r'^timeout\b(.*)$', command)
@@ -273,10 +316,13 @@ def run_interactive():
                 # Special command to update the expect timeout
                 set_timeout(match.group(1))
             elif len(command) > 0:
-                run_command(command)
+                command_type = run_command(command, command_type)
 
     # Restore the saved timeout
     args.timeout = saved_timeout
+
+    # Return the command type we expect next
+    return command_type
 
 ################################################################################
 # Update the expect timeout for an interactive session
@@ -287,7 +333,7 @@ def set_timeout(timeout=''):
 
     # Strip leading and trailing whitespace
     timeout = timeout.strip()
-    
+
     # Verify the timeout is an integer greater than zero
     if re.match(r'^\d+$', timeout):
         seconds = int(timeout)
@@ -305,7 +351,7 @@ def set_timeout(timeout=''):
 ################################################################################
 
 child = None
-args  = get_arguments()
+args = get_arguments()
 
 # ----------------------------------------------
 # Ensure the expect timeout is greater than zero
@@ -319,36 +365,48 @@ if args.timeout <= 0:
 # to be defined using environment variables
 # --------------------------------------------
 
-if ((args.appliance == None) or (args.appliance == '')) and (os.getenv('APPLIANCENAME') != None):
+if (((args.appliance is None) or (args.appliance == ''))
+        and (os.getenv('APPLIANCENAME') is not None)):
     args.appliance = os.getenv('APPLIANCENAME')
 
-if ((args.username == None) or (args.username == '')) and (os.getenv('APPLIANCEUSER') != None):
+if (((args.username is None) or (args.username == ''))
+        and (os.getenv('APPLIANCEUSER') is not None)):
     args.username = os.getenv('APPLIANCEUSER')
 
-if ((args.password == None) or (args.password == '')) and (os.getenv('APPLIANCEPASS') != None):
+if (((args.password is None) or (args.password == ''))
+        and (os.getenv('APPLIANCEPASS') is not None)):
     args.password = os.getenv('APPLIANCEPASS')
+
+# -------------------------------------------
+# Allow a configured runmqsc command prompt
+# to be defined using an environment variable
+# -------------------------------------------
+
+if (((args.mqprompt is None) or (args.mqprompt == ''))
+        and (os.getenv('MQPROMPT') is not None)):
+    args.mqprompt = os.getenv('MQPROMPT')
 
 # ----------------------------------------------------
 # Ensure we have an appliance hostname and credentials
 # ----------------------------------------------------
 
-if ((args.appliance == None) or (args.appliance == '')):
+if ((args.appliance is None) or (args.appliance == '')):
     fatal('The appliance hostname must be specified')
 
-if ((args.username == None) or (args.username == '')):
+if ((args.username is None) or (args.username == '')):
     if sys.stdin.isatty():
         # We don't have a user name, but we have a terminal
         prompt_username()
 
-    if ((args.username == None) or (args.username == '')):
+    if ((args.username is None) or (args.username == '')):
         fatal('The appliance username must be specified')
 
-if ((args.password == None) or (args.password == '')):
+if ((args.password is None) or (args.password == '')):
     if sys.stdin.isatty():
         # We don't have a password, but we have a terminal
         prompt_password()
 
-    if ((args.password == None) or (args.password == '')):
+    if ((args.password is None) or (args.password == '')):
         fatal('The appliance user\'s password must be specified')
 
 # --------------------------------------------
@@ -357,7 +415,7 @@ if ((args.password == None) or (args.password == '')):
 
 ssh_command = 'ssh'
 
-if args.sshoptions != None:
+if args.sshoptions is not None:
     ssh_command = ssh_command + ' ' + args.sshoptions
     
 ssh_command = ssh_command + ' ' + args.appliance
@@ -413,10 +471,10 @@ except (pexpect.EOF, pexpect.TIMEOUT):
 # Execute the MQ command(s)
 # -------------------------
 
-if args.command != None:
-    run_command(args.command)
+if args.command is not None:
+    run_command(args.command, COMMAND_TYPE_MQCLI)
 else:
-    run_interactive()
+    run_interactive(COMMAND_TYPE_MQCLI)
 
 # ---------------
 # Exit the MQ CLI

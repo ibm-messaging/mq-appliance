@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 ################################################################################
-# Copyright 2019 IBM Corporation
+# Copyright 2019, 2022 IBM Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,6 +48,10 @@ use constant NO  => 0;
 # Constant for sending an enter/return key
 use constant ENTER_KEY => "\n";
 
+# Constants for command types
+use constant COMMAND_TYPE_MQCLI   => 1;
+use constant COMMAND_TYPE_RUNMQSC => 2;
+
 ################################################################################
 # Global variables
 ################################################################################
@@ -57,6 +61,9 @@ my %options;
 
 # The concatenated command line options
 my $command_line_options = join(' ', @ARGV);
+
+# The current command type
+my $command_type = COMMAND_TYPE_MQCLI;
 
 # The expect session
 my $expect;
@@ -73,6 +80,7 @@ $options{'appliance'}   = '';
 $options{'command'}     = '';
 $options{'help'}        = NO;
 $options{'interactive'} = NO;
+$options{'mqprompt'}    = '';
 $options{'password'}    = '';
 $options{'sshoptions'}  = '';
 $options{'timeout'}     = 60;
@@ -94,6 +102,7 @@ GetOptions
   'appliance|a=s'  => \$options{'appliance'},
   'command|c=s'    => \$options{'command'},
   'interactive|i'  => \$options{'interactive'},
+  'mqprompt|m=s'   => \$options{'mqprompt'},
   'password|p=s'   => \$options{'password'},
   'sshoptions|s=s' => \$options{'sshoptions'},
   'timeout|t=i'    => \$options{'timeout'},
@@ -170,6 +179,17 @@ if ( ( ! $options{'password'} )
   && ( $ENV{'APPLIANCEPASS'} ) )
 {
   $options{'password'} = $ENV{'APPLIANCEPASS'};
+}
+
+# -------------------------------------------
+# Allow a configured runmqsc command prompt
+# to be defined using an environment variable
+# -------------------------------------------
+
+if ( ( ! $options{'mqprompt'} )
+  && ( $ENV{'MQPROMPT'} ) )
+{
+  $options{'mqprompt'} = $ENV{'MQPROMPT'};
 }
 
 # ----------------------------------------------------
@@ -343,6 +363,7 @@ To execute MQ CLI commands:
 
   mqcli.pl -c|command <command> | -i|interactive
            [ -a|appliance <hostname> ]
+           [ -m|mqprompt] <prompt> ]
            [ -u|username <username> ]
            [ -p|password <password> ]
            [ -s|sshoptions <options> ]
@@ -353,6 +374,7 @@ Parameter information:
   -a : The hostname or IP address of the appliance
   -c : A single MQ control command to execute
   -i : Interactive mode
+  -m : Configured runmqsc command prompt
   -p : The password for the MQ administrator
   -s : Extra SSH command line options, if required
   -t : The timeout to use for expect in seconds
@@ -363,6 +385,7 @@ Some parameters can alternatively be set as environment variables:
  - APPLIANCENAME : The hostname or IP address of the appliance
  - APPLIANCEUSER : The username of the MQ administrator on the appliance
  - APPLIANCEPASS : The password for the MQ administrator
+ - MQPROMPT      : Configured runmqsc command prompt
 
 If credentials are not specified on the command line, or by using
 environment variables, then the user is prompted to enter them
@@ -371,6 +394,13 @@ interactively if a terminal is available.
 In interactive mode the expect timeout can be modified for subsequent
 commands by entering 'timeout <seconds>'. This is useful when executing
 a potentially long-running command.
+
+A custom runmqsc command prompt is required to execute MQSC commands by
+using this client. To configure a custom runmqsc command prompt you set
+the global MQPROMPT environment variable on the appliance by using the
+setmqvar command in the mqcli. You then provide the configured prompt to
+this client by using either the -m parameter, or by setting the same
+environment variable locally.
 
 --END--
 }
@@ -403,7 +433,14 @@ sub display_prompt
   }
 
   # Display the command prompt
-  print STDOUT '[' . $options{'username'} . '@' . $hostname . ' mqcli]$ ';
+  if ( $command_type == COMMAND_TYPE_MQCLI )
+  {
+    print STDOUT '[' . $options{'username'} . '@' . $hostname . ' mqcli]$ ';
+  }
+  else
+  {
+    print STDOUT '[' . $options{'username'} . '@' . $hostname . ' runmqsc]$ ';
+  }
 }
 
 ################################################################################
@@ -527,15 +564,51 @@ sub run_command
 {
   my $command = shift || '';
 
+  # Check if we are starting runmqsc
+  if ( $command =~ m|runmqsc| )
+  {
+    $command_type = COMMAND_TYPE_RUNMQSC;
+  }
+
   # Send the command
   $expect -> send ($command . ENTER_KEY);
 
   # Wait for command prompt, which means the command has completed
-  my @response = $expect -> expect ($options{'timeout'}, "mqa(mqcli)# ");
+  my @response;
+
+  if ( $command_type == COMMAND_TYPE_MQCLI )
+  {
+    # Match the mqcli command prompt
+    @response = $expect -> expect ($options{'timeout'}, "mqa(mqcli)# ");
+  }
+  elsif ( $command_type == COMMAND_TYPE_RUNMQSC )
+  {
+    if ( $options{'mqprompt'} )
+    {
+      # Match the mqcli command prompt (when runmqsc ends), or the configured runmqsc prompt
+      @response = $expect -> expect ($options{'timeout'}, "mqa(mqcli)# ", $options{'mqprompt'} );
+    }
+    else
+    {
+      # The runmqsc command has a blank command prompt by default, which we cannot match on
+      fatal('A custom runmqsc command prompt is required to execute MQSC commands');
+    }
+  }
+  else
+  {
+    fatal('Unexpected command type');
+  }
 
   if ( defined $response[1] )
   {
     fatal('Failed to execute an MQ command');
+  }
+
+  if ( ( defined $response[2] )
+    && ( $response[2] eq "mqa(mqcli)# " ) )
+  {
+    # We matched the mqcli command prompt so runmqsc has ended (if applicable)
+    $command_type = COMMAND_TYPE_MQCLI;
   }
 
   if ( defined $response[3] )
@@ -585,7 +658,8 @@ sub run_interactive
     }
 
     # Execute the command unless we've been asked to exit
-    if ( $command =~ m/^(exit|top)$/ )
+    if ( ( $command =~ m/^(exit|top)$/ )
+      && ( $command_type != COMMAND_TYPE_RUNMQSC ) )
     {
       $end = YES;
     }
